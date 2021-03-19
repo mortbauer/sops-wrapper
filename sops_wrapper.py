@@ -25,6 +25,11 @@ def get_sops_config():
         conf = yaml.load(sopsf)
     return conf
 
+def get_matching_files():
+    for root,dirs,files in os.walk('.'):
+        for filepath in files:
+            yield os.path.join(root,filepath)
+
 def get_staged_files():
     comp_process = subprocess.run(
         ['git','diff','--name-only','--cached'],
@@ -57,6 +62,7 @@ def make_parser():
 
 def setup_common_parser(parser):
     parser.add_argument('-d','--dry-run',action='store_true',help='only print actions without doing them')
+    parser.add_argument('-g','--use-git',action='store_true',help='use git for getting')
 
 def setup_encrypt(parser):
     parser.set_defaults(command=encrypt)
@@ -67,25 +73,31 @@ def setup_decrypt(parser):
     setup_common_parser(parser)
 
 
-def encrypt(dry_run=False):
+def encrypt(dry_run=False,use_git=False):
     conf = get_sops_config()
     patterns = set()
     for rule in conf.get('creation_rules',[]):
         patterns.add('({})'.format(rule.get('path_regex')))
     pattern = re.compile('|'.join(patterns))
     paths = []
-    for path in get_staged_files():
+    if use_git:
+        iterator = get_staged_files()
+    else:
+        iterator = get_matching_files()
+    for path in iterator:
         if pattern.search(path):
             if not is_encrypted(path):
                 if not dry_run:
                     subprocess.run(['sops','--in-place','--encrypt',path],check=True)
                     paths.append(path)
-                logger.info('encrypted %s with sops',path)
+                    logger.info('encrypted %s with sops',path)
+                else:
+                    print(f'would encrypt {path}')
             else:
                 logger.info('%s already encrypted with sops',path)
         else:
             logger.debug('no match for %s',path)
-    if paths:
+    if paths and not dry_run:
         # no add the changed files to the staging area again
         subprocess.run(['git','add']+paths)
 
