@@ -84,30 +84,42 @@ def encrypt(dry_run=False,use_git=False):
         iterator = get_staged_files()
     else:
         iterator = get_matching_files()
+    errors = []
     for path in iterator:
-        if pattern.search(path):
+        if os.path.normpath(path) == '.sops.yaml':
+            continue
+        elif pattern.search(path):
             if not is_encrypted(path):
                 if not dry_run:
-                    subprocess.run(['sops','--in-place','--encrypt',path],check=True)
+                    try:
+                        subprocess.run(['sops','--in-place','--encrypt',path],check=True)
+                    except Exception as err:
+                        errors.append((path,err))
                     paths.append(path)
-                    logger.info('encrypted %s with sops',path)
+                    # logger.info('encrypted %s with sops',path)
                 else:
                     print(f'would encrypt {path}')
             else:
                 logger.info('%s already encrypted with sops',path)
         else:
             logger.debug('no match for %s',path)
-    if paths and not dry_run:
+    if errors:
+        raise Exception('found %s'%errors)
+    # if paths and not dry_run:
         # no add the changed files to the staging area again
-        subprocess.run(['git','add']+paths)
+        # subprocess.run(['git','add']+paths)
 
-def decrypt(dry_run=False):
+def decrypt(dry_run=False,use_git=False):
     conf = get_sops_config()
     patterns = set()
     for rule in conf.get('creation_rules',[]):
         patterns.add('({})'.format(rule.get('path_regex')))
     pattern = re.compile('|'.join(patterns))
-    for path in get_tracked_files():
+    if use_git:
+        iterator = get_staged_files()
+    else:
+        iterator = get_matching_files()
+    for path in iterator:
         if pattern.search(path):
             if is_encrypted(path):
                 if not dry_run:
