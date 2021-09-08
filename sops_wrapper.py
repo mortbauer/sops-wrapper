@@ -60,6 +60,7 @@ def make_parser():
     subparsers = parser.add_subparsers()
     setup_encrypt(subparsers.add_parser('encrypt', help='encrypt all staged files'))
     setup_decrypt(subparsers.add_parser('decrypt', help='decrypt all tracked files'))
+    parser.add_argument('-l','--log-level',default='WARNING')
     return parser
 
 def setup_common_parser(parser):
@@ -78,7 +79,8 @@ def needs_encryption(encrypted_regex,path):
     pattern = re.compile(encrypted_regex)
     with open(path,'r') as _file:
         for line in _file:
-            if pattern.match(line):
+            if pattern.search(line):
+                logger.debug('Matching pattern %s for line %s for %s',pattern,line,path)
                 return True
     return False
 
@@ -92,6 +94,7 @@ def encrypt(dry_run=False,use_git=False):
         iterator = get_staged_files()
     else:
         iterator = get_matching_files()
+    errors = []
     for path in iterator:
         rule = None
         for pattern in patterns:
@@ -99,28 +102,39 @@ def encrypt(dry_run=False,use_git=False):
                 rule = patterns[pattern]
         if rule is not None:
             encrypted_regex = rule.get('encrypted_regex','.*')
-            if not is_encrypted(path) and needs_encryption(encrypted_regex,path):
+            if is_encrypted(path):
+                logger.info('%s already encrypted with sops',path)
+            elif not needs_encryption(encrypted_regex,path):
+                logger.log(5,'%s not matching any encrypted_regex',path)
+            else:
                 if not dry_run:
-                    subprocess.run(['sops','--in-place','--encrypt',path],check=True)
+                    try:
+                        subprocess.run(['sops','--in-place','--encrypt',path],check=True)
+                    except Exception as err:
+                        errors.append((path,err))
                     paths.append(path)
-                    logger.info('encrypted %s with sops',path)
+                    # logger.info('encrypted %s with sops',path)
                 else:
                     print(f'would encrypt {path}')
-            else:
-                logger.info('%s already encrypted with sops',path)
         else:
-            logger.debug('no match for %s',path)
-    if paths and not dry_run:
+            logger.log(5,'no match for %s',path)
+    if errors:
+        raise Exception('found %s'%errors)
+    # if paths and not dry_run:
         # no add the changed files to the staging area again
-        subprocess.run(['git','add']+paths)
+        # subprocess.run(['git','add']+paths)
 
-def decrypt(dry_run=False):
+def decrypt(dry_run=False,use_git=False):
     conf = get_sops_config()
     patterns = set()
     for rule in conf.get('creation_rules',[]):
         patterns.add('({})'.format(rule.get('path_regex')))
     pattern = re.compile('|'.join(patterns))
-    for path in get_tracked_files():
+    if use_git:
+        iterator = get_staged_files()
+    else:
+        iterator = get_matching_files()
+    for path in iterator:
         if pattern.search(path):
             if is_encrypted(path):
                 if not dry_run:
@@ -133,9 +147,9 @@ def decrypt(dry_run=False):
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
     parser = make_parser()
     kwargs = vars(parser.parse_args())
+    logging.basicConfig(level=kwargs.pop('log_level','info').upper())
     if 'command' not in kwargs:
         parser.print_help()
     else:
