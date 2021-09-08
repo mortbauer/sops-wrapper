@@ -28,6 +28,8 @@ def get_sops_config():
 def get_matching_files():
     for root,dirs,files in os.walk('.'):
         for filepath in files:
+            if filepath.endswith('.sops.yaml'):
+                continue
             yield os.path.join(root,filepath)
 
 def get_staged_files():
@@ -72,21 +74,32 @@ def setup_decrypt(parser):
     parser.set_defaults(command=decrypt)
     setup_common_parser(parser)
 
+def needs_encryption(encrypted_regex,path):
+    pattern = re.compile(encrypted_regex)
+    with open(path,'r') as _file:
+        for line in _file:
+            if pattern.match(line):
+                return True
+    return False
 
 def encrypt(dry_run=False,use_git=False):
     conf = get_sops_config()
-    patterns = set()
+    patterns = {}
     for rule in conf.get('creation_rules',[]):
-        patterns.add('({})'.format(rule.get('path_regex')))
-    pattern = re.compile('|'.join(patterns))
+        patterns[re.compile(rule.get('path_regex'))] = rule
     paths = []
     if use_git:
         iterator = get_staged_files()
     else:
         iterator = get_matching_files()
     for path in iterator:
-        if pattern.search(path):
-            if not is_encrypted(path):
+        rule = None
+        for pattern in patterns:
+            if pattern.search(path):
+                rule = patterns[pattern]
+        if rule is not None:
+            encrypted_regex = rule.get('encrypted_regex','.*')
+            if not is_encrypted(path) and needs_encryption(encrypted_regex,path):
                 if not dry_run:
                     subprocess.run(['sops','--in-place','--encrypt',path],check=True)
                     paths.append(path)
