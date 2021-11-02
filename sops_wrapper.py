@@ -101,10 +101,10 @@ def encrypt(dry_run=False,use_git=False):
             if pattern.search(path):
                 rule = patterns[pattern]
         if rule is not None:
-            encrypted_regex = rule.get('encrypted_regex','.*')
+            encrypted_regex = rule.get('encrypted_regex',None)
             if is_encrypted(path):
                 logger.info('%s already encrypted with sops',path)
-            elif not needs_encryption(encrypted_regex,path):
+            elif encrypted_regex is not None and not needs_encryption(encrypted_regex,path):
                 logger.log(5,'%s not matching any encrypted_regex',path)
             else:
                 if not dry_run:
