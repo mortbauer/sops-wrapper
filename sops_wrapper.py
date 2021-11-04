@@ -88,7 +88,9 @@ def encrypt(dry_run=False,use_git=False):
     conf = get_sops_config()
     patterns = {}
     for rule in conf.get('creation_rules',[]):
-        patterns[re.compile(rule.get('path_regex'))] = rule
+        path_regex = rule.get('path_regex')
+        if path_regex:
+            patterns[re.compile(path_regex)] = rule
     paths = []
     if use_git:
         iterator = get_staged_files()
@@ -128,7 +130,9 @@ def decrypt(dry_run=False,use_git=False):
     conf = get_sops_config()
     patterns = set()
     for rule in conf.get('creation_rules',[]):
-        patterns.add('({})'.format(rule.get('path_regex')))
+        path_regex = rule.get('path_regex')
+        if path_regex:
+            patterns.add('({})'.format(path_regex))
     pattern = re.compile('|'.join(patterns))
     if use_git:
         iterator = get_staged_files()
