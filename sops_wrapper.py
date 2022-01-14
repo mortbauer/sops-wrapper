@@ -60,12 +60,14 @@ def make_parser():
     subparsers = parser.add_subparsers()
     setup_encrypt(subparsers.add_parser('encrypt', help='encrypt all staged files'))
     setup_decrypt(subparsers.add_parser('decrypt', help='decrypt all tracked files'))
-    parser.add_argument('-l','--log-level',default='WARNING')
+    parser.add_argument('-l','--log-level',default='INFO')
     return parser
 
 def setup_common_parser(parser):
     parser.add_argument('-d','--dry-run',action='store_true',help='only print actions without doing them')
     parser.add_argument('-g','--use-git',action='store_true',help='use git for getting')
+    parser.add_argument('-i','--in-place',action='store_true',help='encrypt/decrypt in place')
+    parser.add_argument('-s','--suffix',default='.enc',help='suffix to append/remove when encrypting/decrypting')
 
 def setup_encrypt(parser):
     parser.set_defaults(command=encrypt)
@@ -84,7 +86,7 @@ def needs_encryption(encrypted_regex,path):
                 return True
     return False
 
-def encrypt(dry_run=False,use_git=False):
+def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
     conf = get_sops_config()
     patterns = {}
     for rule in conf.get('creation_rules',[]):
@@ -111,7 +113,12 @@ def encrypt(dry_run=False,use_git=False):
             else:
                 if not dry_run:
                     try:
-                        subprocess.run(['sops','--in-place','--encrypt',path],check=True)
+                        if not in_place:
+                            encrypted_path = f'{path}{suffix}'
+                            with open(encrypted_path,'wb') as outfile:
+                                subprocess.run(['sops','--encrypt',path],check=True,stdout=outfile)
+                        else:
+                            subprocess.run(['sops','--in-place','--encrypt',path],check=True)
                     except Exception as err:
                         errors.append((path,err))
                     paths.append(path)
@@ -126,13 +133,16 @@ def encrypt(dry_run=False,use_git=False):
         # no add the changed files to the staging area again
         # subprocess.run(['git','add']+paths)
 
-def decrypt(dry_run=False,use_git=False):
+def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
     conf = get_sops_config()
     patterns = set()
     for rule in conf.get('creation_rules',[]):
         path_regex = rule.get('path_regex')
         if path_regex:
-            patterns.add('({})'.format(path_regex))
+            if not in_place:
+                patterns.add(f'({path_regex}{suffix})')
+            else:
+                patterns.add(f'({patterns})')
     pattern = re.compile('|'.join(patterns))
     if use_git:
         iterator = get_staged_files()
@@ -142,7 +152,12 @@ def decrypt(dry_run=False,use_git=False):
         if pattern.search(path):
             if is_encrypted(path):
                 if not dry_run:
-                    subprocess.run(['sops','--in-place','--decrypt',path],check=True)
+                    if not in_place:
+                        decrypted_path = path.rstrip(suffix)
+                        with open(decrypted_path,'wb') as outfile:
+                            subprocess.run(['sops','--decrypt',path],check=True,stdout=outfile)
+                    else:
+                        subprocess.run(['sops','--in-place','--decrypt',path],check=True)
                 logger.info('decrypted %s with sops',path)
             else:
                 logger.info('%s already decrypted',path)
