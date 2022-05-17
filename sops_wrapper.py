@@ -111,20 +111,22 @@ def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
             elif encrypted_regex is not None and not needs_encryption(encrypted_regex,path):
                 logger.log(5,'%s not matching any encrypted_regex',path)
             else:
-                if not dry_run:
-                    try:
-                        if not in_place:
-                            encrypted_path = f'{path}{suffix}'
+                try:
+                    if not in_place:
+                        encrypted_path = f'{path}{suffix}'
+                        if dry_run:
+                            print(f'would encrypt {path} to {encrypted_path}')
+                        else:
                             with open(encrypted_path,'wb') as outfile:
                                 subprocess.run(['sops','--encrypt',path],check=True,stdout=outfile)
+                    else:
+                        if dry_run:
+                            print(f'would encrypt {path}')
                         else:
                             subprocess.run(['sops','--in-place','--encrypt',path],check=True)
-                    except Exception as err:
-                        errors.append((path,err))
-                    paths.append(path)
-                    # logger.info('encrypted %s with sops',path)
-                else:
-                    print(f'would encrypt {path}')
+                except Exception as err:
+                    errors.append((path,err))
+                paths.append(path)
         else:
             logger.log(5,'no match for %s',path)
     if errors:
