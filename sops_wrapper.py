@@ -142,7 +142,7 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
         path_regex = rule.get('path_regex')
         if path_regex:
             if not in_place:
-                patterns.add(f'({path_regex}{suffix})')
+                patterns.add(f'({path_regex})')
             else:
                 patterns.add(f'({patterns})')
     pattern = re.compile('|'.join(patterns))
@@ -153,14 +153,18 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
     for path in iterator:
         if pattern.search(path):
             if is_encrypted(path):
-                if not dry_run:
-                    if not in_place:
-                        decrypted_path = path.rstrip(suffix)
+                if not in_place:
+                    decrypted_path = path.rstrip(suffix)
+                    if dry_run:
+                        logger.info('would decrypted %s to %s',path,decrypted_path)
+                    else:
                         with open(decrypted_path,'wb') as outfile:
                             subprocess.run(['sops','--decrypt',path],check=True,stdout=outfile)
+                else:
+                    if dry_run:
+                        logger.info('would decrypted %s to %s',path,path)
                     else:
                         subprocess.run(['sops','--in-place','--decrypt',path],check=True)
-                logger.info('decrypted %s with sops',path)
             else:
                 logger.info('%s already decrypted',path)
         else:
