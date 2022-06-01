@@ -60,6 +60,7 @@ def make_parser():
     subparsers = parser.add_subparsers()
     setup_encrypt(subparsers.add_parser('encrypt', help='encrypt all staged files'))
     setup_decrypt(subparsers.add_parser('decrypt', help='decrypt all tracked files'))
+    setup_gitignore(subparsers.add_parser('gitignore', help='make git ignore secret files'))
     parser.add_argument('-l','--log-level',default='INFO')
     return parser
 
@@ -77,6 +78,10 @@ def setup_decrypt(parser):
     parser.set_defaults(command=decrypt)
     setup_common_parser(parser)
 
+def setup_gitignore(parser):
+    parser.set_defaults(command=manage_gitignore)
+    setup_common_parser(parser)
+
 def needs_encryption(encrypted_regex,path):
     pattern = re.compile(encrypted_regex)
     with open(path,'r') as _file:
@@ -86,54 +91,83 @@ def needs_encryption(encrypted_regex,path):
                 return True
     return False
 
-def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
+def secret_files_iterator(use_git=False):
     conf = get_sops_config()
     patterns = {}
     for rule in conf.get('creation_rules',[]):
         path_regex = rule.get('path_regex')
         if path_regex:
             patterns[re.compile(path_regex)] = rule
-    paths = []
     if use_git:
         iterator = get_staged_files()
     else:
         iterator = get_matching_files()
-    errors = []
     for path in iterator:
         rule = None
         for pattern in patterns:
             if pattern.search(path):
                 rule = patterns[pattern]
         if rule is not None:
-            encrypted_regex = rule.get('encrypted_regex',None)
-            if is_encrypted(path):
-                logger.info('%s already encrypted with sops',path)
-            elif encrypted_regex is not None and not needs_encryption(encrypted_regex,path):
-                logger.log(5,'%s not matching any encrypted_regex',path)
-            else:
-                try:
-                    if not in_place:
-                        encrypted_path = f'{path}{suffix}'
-                        if dry_run:
-                            print(f'would encrypt {path} to {encrypted_path}')
-                        else:
-                            with open(encrypted_path,'wb') as outfile:
-                                subprocess.run(['sops','--encrypt',path],check=True,stdout=outfile)
-                    else:
-                        if dry_run:
-                            print(f'would encrypt {path}')
-                        else:
-                            subprocess.run(['sops','--in-place','--encrypt',path],check=True)
-                except Exception as err:
-                    errors.append((path,err))
-                paths.append(path)
+            yield path,rule
         else:
             logger.log(5,'no match for %s',path)
+
+def manage_gitignore(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
+    files = '\n'.join([path.lstrip('./') for path,rule in secret_files_iterator(use_git=use_git)])
+    other_lines = get_gitignore_others()
+    if not dry_run:
+        write_gitignore(other_lines,files)
+    else:
+        print(files)
+
+def get_gitignore_others():
+    other_lines = []
+    with open('.gitignore','r') as gitignore_file:
+        record = True
+        for line in gitignore_file:
+            if line.startswith('#> managed by sops-wrapper'):
+                record = False
+            elif line.startswith('#< managed by sops-wrapper'):
+                record = True
+            elif record and line.strip():
+                other_lines.append(line)
+    return other_lines
+
+def write_gitignore(other_lines,ours):
+    with open('.gitignore','w') as gitignore_file:
+        for line in other_lines:
+            gitignore_file.write(line)
+        gitignore_file.write('\n#> managed by sops-wrapper\n')
+        for line in ours:
+            gitignore_file.write(line)
+        gitignore_file.write('\n#< managed by sops-wrapper')
+
+def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
+    errors = []
+    for path,rule in secret_files_iterator(use_git=use_git):
+        encrypted_regex = rule.get('encrypted_regex',None)
+        if is_encrypted(path):
+            logger.info('%s already encrypted with sops',path)
+        elif encrypted_regex is not None and not needs_encryption(encrypted_regex,path):
+            logger.log(5,'%s not matching any encrypted_regex',path)
+        else:
+            try:
+                if not in_place:
+                    encrypted_path = f'{path}{suffix}'
+                    if dry_run:
+                        print(f'would encrypt {path} to {encrypted_path}')
+                    else:
+                        with open(encrypted_path,'wb') as outfile:
+                            subprocess.run(['sops','--encrypt',path],check=True,stdout=outfile)
+                else:
+                    if dry_run:
+                        print(f'would encrypt {path}')
+                    else:
+                        subprocess.run(['sops','--in-place','--encrypt',path],check=True)
+            except Exception as err:
+                errors.append((path,err))
     if errors:
         raise Exception('found %s'%errors)
-    # if paths and not dry_run:
-        # no add the changed files to the staging area again
-        # subprocess.run(['git','add']+paths)
 
 def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
     conf = get_sops_config()
