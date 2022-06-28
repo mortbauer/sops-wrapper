@@ -200,7 +200,8 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
                     else:
                         subprocess.run(['sops','--in-place','--decrypt',path],check=True)
             else:
-                logger.info('%s already decrypted',path)
+                if in_place or path != path.rstrip(suffix):
+                    logger.info('%s already decrypted',path)
         else:
             logger.debug('no match for %s',path)
 
