@@ -203,7 +203,7 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
                         cmd.append('--input-type')
                         cmd.append(our_rule['input_type'])
                 if not in_place:
-                    decrypted_path = path.rstrip(suffix)
+                    decrypted_path = path[:-len(suffix)]
                     if dry_run:
                         logger.info('would decrypted %s to %s',path,decrypted_path)
                     else:
