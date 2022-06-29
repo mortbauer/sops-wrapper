@@ -172,13 +172,13 @@ def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
 def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
     conf = get_sops_config()
     patterns = set()
+    rules = []
     for rule in conf.get('creation_rules',[]):
         path_regex = rule.get('path_regex')
         if path_regex:
-            if not in_place:
-                patterns.add(f'({path_regex})')
-            else:
-                patterns.add(f'({patterns})')
+            rule['path_regex'] = re.compile(path_regex)
+            rules.append(rule)
+            patterns.add(f'({path_regex})')
     pattern = re.compile('|'.join(patterns))
     if use_git:
         iterator = get_staged_files()
@@ -187,18 +187,33 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
     for path in iterator:
         if pattern.search(path):
             if is_encrypted(path):
+                cmd = ['sops']
+                our_rule = None
+                for rule in rules:
+                    if rule['path_regex'].search(path):
+                        our_rule = rule
+                        break
+                if our_rule is None:
+                    logger.warning('No rule matching now for %s',path)
+                else:
+                    if 'output_type' in our_rule:
+                        cmd.append('--output-type')
+                        cmd.append(our_rule['output_type'])
+                    if 'input_type' in our_rule:
+                        cmd.append('--input-type')
+                        cmd.append(our_rule['input_type'])
                 if not in_place:
                     decrypted_path = path.rstrip(suffix)
                     if dry_run:
                         logger.info('would decrypted %s to %s',path,decrypted_path)
                     else:
                         with open(decrypted_path,'wb') as outfile:
-                            subprocess.run(['sops','--decrypt',path],check=True,stdout=outfile)
+                            subprocess.run(cmd + ['--decrypt',path],check=True,stdout=outfile)
                 else:
                     if dry_run:
                         logger.info('would decrypted %s to %s',path,path)
                     else:
-                        subprocess.run(['sops','--in-place','--decrypt',path],check=True)
+                        subprocess.run(cmd+['--in-place','--decrypt',path],check=True)
             else:
                 if in_place or path != path.rstrip(suffix):
                     logger.info('%s already decrypted',path)
