@@ -1,4 +1,5 @@
 import os
+import shlex
 import re
 import argparse
 import logging
@@ -62,6 +63,7 @@ def make_parser():
     setup_decrypt(subparsers.add_parser('decrypt', help='decrypt all tracked files'))
     setup_gitignore(subparsers.add_parser('gitignore', help='make git ignore secret files'))
     parser.add_argument('-l','--log-level',default='INFO')
+    parser.add_argument('--sops-args',default='')
     return parser
 
 def setup_common_parser(parser):
@@ -145,7 +147,10 @@ def write_gitignore(other_lines,ours):
             gitignore_file.write(line)
         gitignore_file.write('\n#< managed by sops-wrapper')
 
-def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False):
+def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False,sops_args:str=''):
+    _cmd = ['sops']
+    if sops_args:
+        _cmd += shlex.split(sops_args)
     errors = []
     for path,rule in secret_files_iterator(use_git=use_git):
         if not in_place:
@@ -161,7 +166,7 @@ def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=
             logger.log(5,'Skipping path %s because endswith encrypt suffix',path)
         else:
             try:
-                cmd = ['sops']
+                cmd = _cmd.copy()
                 if 'input_type' in rule:
                     cmd.append('--input-type')
                     cmd.append(rule['input_type'])
@@ -184,14 +189,17 @@ def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=
     if errors:
         raise Exception('found %s'%errors)
 
-def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False):
+def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False,sops_args:str=''):
+    _cmd = ['sops']
+    if sops_args:
+        _cmd += shlex.split(sops_args)
     for path,rule in secret_files_iterator(use_git=use_git):
+        cmd = _cmd.copy()
         if not in_place:
             decrypted_path = path[:-len(suffix)]
         else:
             decrypted_path = path
         if not in_place or is_encrypted(path):
-            cmd = ['sops']
             if 'output_type' in rule:
                 cmd.append('--output-type')
                 cmd.append(rule['output_type'])
