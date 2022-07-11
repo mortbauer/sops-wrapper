@@ -84,11 +84,14 @@ def setup_gitignore(parser):
 
 def needs_encryption(encrypted_regex,path):
     pattern = re.compile(encrypted_regex)
-    with open(path,'r') as _file:
-        for line in _file:
-            if pattern.search(line):
-                logger.debug('Matching pattern %s for line %s for %s',pattern,line,path)
-                return True
+    try:
+        with open(path,'r') as _file:
+            for line in _file:
+                if pattern.search(line):
+                    logger.debug('Matching pattern %s for line %s for %s',pattern,line,path)
+                    return True
+    except FileNotFoundError:
+        return True
     return False
 
 def secret_files_iterator(use_git=False):
@@ -142,14 +145,20 @@ def write_gitignore(other_lines,ours):
             gitignore_file.write(line)
         gitignore_file.write('\n#< managed by sops-wrapper')
 
-def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
+def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False):
     errors = []
     for path,rule in secret_files_iterator(use_git=use_git):
+        if not in_place:
+            encrypted_path = f'{path}{suffix}'
+        else:
+            encrypted_path = path
         encrypted_regex = rule.get('encrypted_regex',None)
-        if is_encrypted(path):
-            logger.info('%s already encrypted with sops',path)
+        if not force and in_place and is_encrypted(encrypted_path):
+            logger.info('%s already encrypted with sops',encrypted_path)
         elif encrypted_regex is not None and not needs_encryption(encrypted_regex,path):
             logger.log(5,'%s not matching any encrypted_regex',path)
+        elif not in_place and path.endswith(suffix):
+            logger.log(5,'Skipping path %s because endswith encrypt suffix',path)
         else:
             try:
                 cmd = ['sops']
@@ -160,7 +169,6 @@ def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
                     cmd.append('--output-type')
                     cmd.append(rule['output_type'])
                 if not in_place:
-                    encrypted_path = f'{path}{suffix}'
                     if dry_run:
                         print(f'would encrypt {path} to {encrypted_path}')
                     else:
@@ -176,9 +184,13 @@ def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
     if errors:
         raise Exception('found %s'%errors)
 
-def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
+def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False):
     for path,rule in secret_files_iterator(use_git=use_git):
-        if is_encrypted(path):
+        if not in_place:
+            decrypted_path = path[:-len(suffix)]
+        else:
+            decrypted_path = path
+        if not in_place or is_encrypted(path):
             cmd = ['sops']
             if 'output_type' in rule:
                 cmd.append('--output-type')
@@ -187,7 +199,6 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
                 cmd.append('--input-type')
                 cmd.append(rule['input_type'])
             if not in_place:
-                decrypted_path = path[:-len(suffix)]
                 if dry_run:
                     logger.info('would decrypted %s to %s',path,decrypted_path)
                 else:
