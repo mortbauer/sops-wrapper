@@ -195,10 +195,12 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=
         _cmd += shlex.split(sops_args)
     for path,rule in secret_files_iterator(use_git=use_git):
         cmd = _cmd.copy()
-        if not in_place:
+        if not in_place and path.endswith(suffix):
             decrypted_path = path[:-len(suffix)]
-        else:
+        elif in_place:
             decrypted_path = path
+        else:
+            continue
         if not in_place or is_encrypted(path):
             if 'output_type' in rule:
                 cmd.append('--output-type')
