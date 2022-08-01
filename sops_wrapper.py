@@ -63,7 +63,6 @@ def make_parser():
     setup_decrypt(subparsers.add_parser('decrypt', help='decrypt all tracked files'))
     setup_gitignore(subparsers.add_parser('gitignore', help='make git ignore secret files'))
     parser.add_argument('-l','--log-level',default='INFO')
-    parser.add_argument('--sops-args',default='')
     return parser
 
 def setup_common_parser(parser):
@@ -74,10 +73,12 @@ def setup_common_parser(parser):
 
 def setup_encrypt(parser):
     parser.set_defaults(command=encrypt)
+    parser.add_argument('--sops-args',default='')
     setup_common_parser(parser)
 
 def setup_decrypt(parser):
     parser.set_defaults(command=decrypt)
+    parser.add_argument('--sops-args',default='')
     setup_common_parser(parser)
 
 def setup_gitignore(parser):
@@ -118,7 +119,11 @@ def secret_files_iterator(use_git=False):
             logger.log(5,'no match for %s',path)
 
 def manage_gitignore(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
-    files = '\n'.join([path.lstrip('./') for path,rule in secret_files_iterator(use_git=use_git)])
+    files_to_ignore = []
+    for path,rule in secret_files_iterator(use_git=use_git):
+        if in_place or not path.endswith(suffix):
+            files_to_ignore.append(path.lstrip('./'))
+    files = '\n'.join(files_to_ignore)
     other_lines = get_gitignore_others()
     if not dry_run:
         write_gitignore(other_lines,files)
