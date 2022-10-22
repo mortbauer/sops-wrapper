@@ -5,6 +5,8 @@ import argparse
 import logging
 import subprocess
 
+from typing import Optional
+
 from ruamel.yaml import YAML
 
 logger = logging.getLogger(__name__)
@@ -74,11 +76,13 @@ def setup_common_parser(parser):
 def setup_encrypt(parser):
     parser.set_defaults(command=encrypt)
     parser.add_argument('--sops-args',default='')
+    parser.add_argument('-p','--path-pattern',help='limit to these files')
     setup_common_parser(parser)
 
 def setup_decrypt(parser):
     parser.set_defaults(command=decrypt)
     parser.add_argument('--sops-args',default='')
+    parser.add_argument('-p','--path-pattern',help='limit to these files')
     setup_common_parser(parser)
 
 def setup_gitignore(parser):
@@ -97,9 +101,12 @@ def needs_encryption(encrypted_regex,path):
         return True
     return False
 
-def secret_files_iterator(use_git=False):
+def secret_files_iterator(use_git=False,path_pattern:Optional[str]=None):
     conf = get_sops_config()
     patterns = {}
+    path_pattern_re = None
+    if path_pattern is not None:
+        path_pattern_re = re.compile(path_pattern)
     for rule in conf.get('creation_rules',[]):
         path_regex = rule.get('path_regex')
         if path_regex:
@@ -110,6 +117,9 @@ def secret_files_iterator(use_git=False):
         iterator = get_matching_files()
     for path in iterator:
         rule = None
+        if path_pattern_re is not None:
+            if not path_pattern_re.match(path):
+                continue
         for pattern in patterns:
             if pattern.search(path):
                 rule = patterns[pattern]
@@ -152,12 +162,20 @@ def write_gitignore(other_lines,ours):
             gitignore_file.write(line)
         gitignore_file.write('\n#< managed by sops-wrapper')
 
-def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False,sops_args:str=''):
+def encrypt(
+        dry_run=False,
+        use_git=False,
+        in_place=False,
+        suffix='.enc',
+        force:bool=False,
+        sops_args:str='',
+        path_pattern:Optional[str]=None,
+    ):
     _cmd = ['sops']
     if sops_args:
         _cmd += shlex.split(sops_args)
     errors = []
-    for path,rule in secret_files_iterator(use_git=use_git):
+    for path,rule in secret_files_iterator(use_git=use_git,path_pattern=path_pattern):
         if not in_place:
             encrypted_path = f'{path}{suffix}'
         else:
@@ -194,11 +212,11 @@ def encrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=
     if errors:
         raise Exception('found %s'%errors)
 
-def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False,sops_args:str=''):
+def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False,sops_args:str='',path_pattern:Optional[str]=None):
     _cmd = ['sops']
     if sops_args:
         _cmd += shlex.split(sops_args)
-    for path,rule in secret_files_iterator(use_git=use_git):
+    for path,rule in secret_files_iterator(use_git=use_git,path_pattern=path_pattern):
         cmd = _cmd.copy()
         if not in_place and path.endswith(suffix):
             decrypted_path = path[:-len(suffix)]
