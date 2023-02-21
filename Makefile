@@ -1,14 +1,16 @@
-.PHONY: build publish
+.PHONY: build publish image
 
+IMAGE_NAME:=mortbauer/sops
+TAG:=latest
 
 build:
 	python -m build
 
-publish:
+publish-wheel:
 	twine upload dist/*
 
 image:
-	docker buildx build --tag mortbauer/sops-wrapper .
+	docker buildx build --tag ${IMAGE_NAME}:${TAG} --load .
 
-publish-image:
-	docker push mortbauer/sops-wrapper
+publish:
+	docker push ${IMAGE_NAME}:${TAG}
