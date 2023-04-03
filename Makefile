@@ -1,6 +1,6 @@
 .PHONY: build publish image
 
-IMAGE_NAME:=mortbauer/sops
+IMAGE_NAME:=mortbauer/sops-wrapper
 TAG:=latest
 
 build:

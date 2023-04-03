@@ -33,7 +33,7 @@ def get_matching_files():
         for filepath in files:
             if filepath.endswith('.sops.yaml'):
                 continue
-            yield os.path.join(root,filepath)
+            yield os.path.join(root,filepath).lstrip('./')
 
 def get_staged_files():
     comp_process = subprocess.run(
@@ -94,7 +94,7 @@ def needs_encryption(encrypted_regex,path):
     try:
         with open(path,'r') as _file:
             for line in _file:
-                if pattern.search(line):
+                if pattern.match(line):
                     logger.debug('Matching pattern %s for line %s for %s',pattern,line,path)
                     return True
     except FileNotFoundError:
@@ -121,7 +121,7 @@ def secret_files_iterator(use_git=False,path_pattern:Optional[str]=None):
             if not path_pattern_re.match(path):
                 continue
         for pattern in patterns:
-            if pattern.search(path):
+            if pattern.match(path):
                 rule = patterns[pattern]
         if rule is not None:
             yield path,rule
@@ -182,7 +182,7 @@ def encrypt(
             encrypted_path = path
         encrypted_regex = rule.get('encrypted_regex',None)
         if not force and in_place and is_encrypted(encrypted_path):
-            logger.info('%s already encrypted with sops',encrypted_path)
+            logger.info(' %s already encrypted with sops',encrypted_path)
         elif encrypted_regex is not None and not needs_encryption(encrypted_regex,path):
             logger.log(5,'%s not matching any encrypted_regex',path)
         elif not in_place and path.endswith(suffix):
@@ -198,13 +198,13 @@ def encrypt(
                     cmd.append(rule['output_type'])
                 if not in_place:
                     if dry_run:
-                        print(f'would encrypt {path} to {encrypted_path}')
+                        print(f'would encrypt: {path} to {encrypted_path}')
                     else:
                         with open(encrypted_path,'wb') as outfile:
                             subprocess.run(cmd+['--encrypt',path],check=True,stdout=outfile)
                 else:
                     if dry_run:
-                        print(f'would encrypt {path}')
+                        print(f'would encrypt: {path}')
                     else:
                         subprocess.run(cmd+['--in-place','--encrypt',path],check=True)
             except Exception as err:
