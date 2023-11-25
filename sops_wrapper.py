@@ -3,6 +3,8 @@ import shlex
 import re
 import argparse
 import logging
+import hashlib
+import tempfile
 import subprocess
 
 from typing import Optional
@@ -162,6 +164,20 @@ def write_gitignore(other_lines,ours):
             gitignore_file.write(line)
         gitignore_file.write('\n#< managed by sops-wrapper')
 
+def needs_encryption_adv(path,encrypted_path,cmd):
+    with tempfile.TemporaryFile(mode='w+b') as outfile:
+        subprocess.run(cmd+['--decrypt',encrypted_path],check=True,stdout=outfile)
+        hasher = hashlib.sha256()
+        outfile.seek(0)
+        unenc = outfile.read()
+        hasher.update(unenc)
+    digest = hasher.hexdigest()
+    hasher = hashlib.sha256()
+    with open(path,'rb') as _file:
+        hasher.update(_file.read())
+    digest2 = hasher.hexdigest()
+    return digest == digest2
+
 def encrypt(
         dry_run=False,
         use_git=False,
@@ -176,6 +192,13 @@ def encrypt(
         _cmd += shlex.split(sops_args)
     errors = []
     for path,rule in secret_files_iterator(use_git=use_git,path_pattern=path_pattern):
+        cmd = _cmd.copy()
+        if 'input_type' in rule:
+            cmd.append('--input-type')
+            cmd.append(rule['input_type'])
+        if 'output_type' in rule:
+            cmd.append('--output-type')
+            cmd.append(rule['output_type'])
         if not in_place:
             encrypted_path = f'{path}{suffix}'
         else:
@@ -187,15 +210,10 @@ def encrypt(
             logger.log(5,'%s not matching any encrypted_regex',path)
         elif not in_place and path.endswith(suffix):
             logger.log(5,'Skipping path %s because endswith encrypt suffix',path)
+        elif not force and needs_encryption_adv(path,encrypted_path,cmd):
+            logger.info(' %s already latest version encrypted with sops',encrypted_path)
         else:
             try:
-                cmd = _cmd.copy()
-                if 'input_type' in rule:
-                    cmd.append('--input-type')
-                    cmd.append(rule['input_type'])
-                if 'output_type' in rule:
-                    cmd.append('--output-type')
-                    cmd.append(rule['output_type'])
                 if not in_place:
                     if dry_run:
                         print(f'would encrypt: {path} to {encrypted_path}')
@@ -250,7 +268,12 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=
 def main():
     parser = make_parser()
     kwargs = vars(parser.parse_args())
-    logging.basicConfig(level=kwargs.pop('log_level','info').upper())
+    log_level = kwargs.pop('log_level','info')
+    try:
+        log_level = int(log_level)
+    except:
+        log_level = log_level.upper()
+    logging.basicConfig(level=log_level)
     if 'command' not in kwargs:
         parser.print_help()
     else:
