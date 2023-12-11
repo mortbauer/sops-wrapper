@@ -30,7 +30,7 @@ def get_sops_config():
         conf = yaml.load(sopsf)
     return conf
 
-def get_matching_files():
+def iter_files():
     for root,dirs,files in os.walk('.'):
         for filepath in files:
             if filepath.endswith('.sops.yaml'):
@@ -111,13 +111,15 @@ def secret_files_iterator(use_git=False,path_pattern:Optional[str]=None):
         path_pattern_re = re.compile(path_pattern)
     for rule in conf.get('creation_rules',[]):
         path_regex = rule.get('path_regex')
+        logger.debug('Adding path_regex: %s',path_regex)
         if path_regex:
             patterns[re.compile(path_regex)] = rule
     if use_git:
         iterator = get_staged_files()
     else:
-        iterator = get_matching_files()
+        iterator = iter_files()
     for path in iterator:
+        logger.log(5,'Testing path: %s',path)
         rule = None
         if path_pattern_re is not None:
             if not path_pattern_re.match(path):
@@ -166,7 +168,10 @@ def write_gitignore(other_lines,ours):
 
 def needs_encryption_adv(path,encrypted_path,cmd):
     with tempfile.TemporaryFile(mode='w+b') as outfile:
-        subprocess.run(cmd+['--decrypt',encrypted_path],check=True,stdout=outfile)
+        try:
+            subprocess.run(cmd+['--decrypt',encrypted_path],check=True,stdout=outfile,stderr=subprocess.PIPE)
+        except:
+            return False
         hasher = hashlib.sha256()
         outfile.seek(0)
         unenc = outfile.read()
@@ -176,7 +181,7 @@ def needs_encryption_adv(path,encrypted_path,cmd):
     with open(path,'rb') as _file:
         hasher.update(_file.read())
     digest2 = hasher.hexdigest()
-    return digest == digest2
+    return digest != digest2
 
 def encrypt(
         dry_run=False,
@@ -191,7 +196,9 @@ def encrypt(
     if sops_args:
         _cmd += shlex.split(sops_args)
     errors = []
+    logger.debug('Making secret_files_iterator with: %s',path_pattern)
     for path,rule in secret_files_iterator(use_git=use_git,path_pattern=path_pattern):
+        logger.debug('Checking path: %s',path)
         cmd = _cmd.copy()
         if 'input_type' in rule:
             cmd.append('--input-type')
@@ -235,6 +242,7 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=
     if sops_args:
         _cmd += shlex.split(sops_args)
     for path,rule in secret_files_iterator(use_git=use_git,path_pattern=path_pattern):
+        logger.debug('Checking path: %s',path)
         cmd = _cmd.copy()
         if not in_place and path.endswith(suffix):
             decrypted_path = path[:-len(suffix)]
