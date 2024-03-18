@@ -88,9 +88,9 @@ def setup_decrypt(parser):
 
 def setup_run_docker_build(parser):
     parser.set_defaults(command=run_docker_build)
-    parser.add_argument('-f','--file',required=True)
+    parser.add_argument('-f','--file',default='Dockerfile')
     parser.add_argument('--sops-args',default='')
-    parser.add_argument('sops_file_path',help='path to secrets file')
+    parser.add_argument('-s','--sops-file-path',dest='sops_file_path',default='.secrets.yaml',help='path to secrets file')
 
 def setup_gitignore(parser):
     parser.set_defaults(command=manage_gitignore)

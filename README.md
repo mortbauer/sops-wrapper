@@ -46,10 +46,10 @@ and create a sops encrypted secrets file "testenv.json" with the command `sops t
 
 example cmd:
 ```
-sops-wrapper dockerbuild testenv.json -f Dockerfile-Test
+sops-wrapper dockerbuild -s testenv.json -f Dockerfile-Test
 ```
 
 which will create a simple docker image, however you hopefully get the idea that you can whatever you want here, you can also pass additional args to docker e.g:
 ```
-sops-wrapper dockerbuild testenv.json -f Dockerfile-Test --progress=plain
+sops-wrapper dockerbuild -s testenv.json -f Dockerfile-Test --progress=plain
 ```
