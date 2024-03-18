@@ -58,13 +58,12 @@ def get_tracked_files():
     )
     return comp_process.stdout.splitlines()
 
-
-
 def make_parser():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
     setup_encrypt(subparsers.add_parser('encrypt', help='encrypt all staged files'))
     setup_decrypt(subparsers.add_parser('decrypt', help='decrypt all tracked files'))
+    setup_run_docker_build(subparsers.add_parser('dockerbuild', help='run docker build with secrets'))
     setup_gitignore(subparsers.add_parser('gitignore', help='make git ignore secret files'))
     parser.add_argument('-l','--log-level',default='INFO')
     return parser
@@ -86,6 +85,12 @@ def setup_decrypt(parser):
     parser.add_argument('--sops-args',default='')
     parser.add_argument('-p','--path-pattern',help='limit to these files')
     setup_common_parser(parser)
+
+def setup_run_docker_build(parser):
+    parser.set_defaults(command=run_docker_build)
+    parser.add_argument('-f','--file',required=True)
+    parser.add_argument('--sops-args',default='')
+    parser.add_argument('sops_file_path',help='path to secrets file')
 
 def setup_gitignore(parser):
     parser.set_defaults(command=manage_gitignore)
@@ -191,6 +196,7 @@ def encrypt(
         force:bool=False,
         sops_args:str='',
         path_pattern:Optional[str]=None,
+        _unknown:str=None,
     ):
     _cmd = ['sops']
     if sops_args:
@@ -237,7 +243,7 @@ def encrypt(
     if errors:
         raise Exception('found %s'%errors)
 
-def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False,sops_args:str='',path_pattern:Optional[str]=None):
+def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=False,sops_args:str='',path_pattern:Optional[str]=None,_unknown:str=None):
     _cmd = ['sops']
     if sops_args:
         _cmd += shlex.split(sops_args)
@@ -272,10 +278,40 @@ def decrypt(dry_run=False,use_git=False,in_place=False,suffix='.enc',force:bool=
             if in_place or path != path.rstrip(suffix):
                 logger.info('%s already decrypted',path)
 
+def run_docker_build(
+        sops_file_path:str,
+        file:str,
+        sops_args:str='',
+        _unknown:str='',
+    ):
+    docker_cmd = [f'docker build -f {file}']
+    _cmd = ['sops','exec-env', sops_file_path,]
+    pattern = re.compile('.*?--mount=type=secret,id=([^ ]+)')
+    comment_pattern = re.compile('^\s*#')
+    secrets = set()
+    with open(file,'r') as f:
+        for line in f:
+            if not comment_pattern.match(line):
+                matches = pattern.findall(line)
+                if matches:
+                    secrets.update(matches)
+
+    for secret in secrets:
+        docker_cmd.append(f'--secret id={secret},env={secret}')
+    if sops_args:
+        _cmd += shlex.split(sops_args)
+    if _unknown:
+        docker_cmd.extend(_unknown)
+    docker_cmd.append('.')
+    _cmd.append(' '.join(docker_cmd))
+    subprocess.run(_cmd,check=True)
+
 
 def main():
     parser = make_parser()
-    kwargs = vars(parser.parse_args())
+    kwargs, unknown = parser.parse_known_args()
+    kwargs = vars(kwargs)
+    kwargs['_unknown'] = unknown
     log_level = kwargs.pop('log_level','info')
     try:
         log_level = int(log_level)
