@@ -35,7 +35,11 @@ def iter_files():
         for filepath in files:
             if filepath.endswith('.sops.yaml'):
                 continue
-            yield os.path.join(root,filepath).lstrip('./')
+            fpath = os.path.join(root,filepath)
+            if fpath.startswith('./'):
+                yield fpath[2:]
+            else:
+                yield fpath
 
 def get_staged_files():
     comp_process = subprocess.run(
@@ -102,7 +106,7 @@ def needs_encryption(encrypted_regex,path):
         with open(path,'r') as _file:
             for line in _file:
                 if pattern.match(line):
-                    logger.debug('Matching pattern %s for line %s for %s',pattern,line,path)
+                    logger.log(5,'Matching pattern %s for line %s for %s',pattern,line,path)
                     return True
     except FileNotFoundError:
         return True
@@ -124,7 +128,7 @@ def secret_files_iterator(use_git=False,path_pattern:Optional[str]=None):
     else:
         iterator = iter_files()
     for path in iterator:
-        logger.log(5,'Testing path: %s',path)
+        logger.log(2,'Testing path: %s',path)
         rule = None
         if path_pattern_re is not None:
             if not path_pattern_re.match(path):
@@ -135,7 +139,7 @@ def secret_files_iterator(use_git=False,path_pattern:Optional[str]=None):
         if rule is not None:
             yield path,rule
         else:
-            logger.log(5,'no match for %s',path)
+            logger.log(2,'no match for %s',path)
 
 def manage_gitignore(dry_run=False,use_git=False,in_place=False,suffix='.enc'):
     files_to_ignore = []
@@ -171,21 +175,37 @@ def write_gitignore(other_lines,ours):
             gitignore_file.write(line)
         gitignore_file.write('\n#< managed by sops-wrapper')
 
-def needs_encryption_adv(path,encrypted_path,cmd):
-    with tempfile.TemporaryFile(mode='w+b') as outfile:
+def needs_encryption_adv(path,encrypted_path,cmd,in_place=False):
+    logger.debug('Checking advanced: %s - %s',path,encrypted_path)
+    if in_place:
         try:
-            subprocess.run(cmd+['--decrypt',encrypted_path],check=True,stdout=outfile,stderr=subprocess.PIPE)
+            with tempfile.NamedTemporaryFile(mode='w+b') as oldencrypted:
+                subprocess.run(['git','show',f'HEAD:{encrypted_path}'],check=True,stdout=oldencrypted,stderr=subprocess.PIPE)
+                oldencrypted.seek(0)
+                with tempfile.TemporaryFile(mode='w+b') as outfile:
+                    subprocess.run(cmd+['--decrypt',oldencrypted.name],check=True,stdout=outfile,stderr=subprocess.PIPE,cwd='/tmp')
+                    outfile.seek(0)
+                    unenc = outfile.read()
         except:
+            logger.log(5,'Failed decrypting: %s',encrypted_path)
             return False
-        hasher = hashlib.sha256()
-        outfile.seek(0)
-        unenc = outfile.read()
-        hasher.update(unenc)
+    else:
+        with tempfile.TemporaryFile(mode='w+b') as outfile:
+            try:
+                subprocess.run(cmd+['--decrypt',encrypted_path],check=True,stdout=outfile,stderr=subprocess.PIPE)
+                outfile.seek(0)
+                unenc = outfile.read()
+            except:
+                logger.log(5,'Failed decrypting: %s',encrypted_path)
+                return False
+    hasher = hashlib.sha256()
+    hasher.update(unenc)
     digest = hasher.hexdigest()
     hasher = hashlib.sha256()
     with open(path,'rb') as _file:
         hasher.update(_file.read())
     digest2 = hasher.hexdigest()
+    logger.log(5,'Hashes for %s: %s - %s matching: %s',encrypted_path,digest,digest2,digest==digest2)
     return digest != digest2
 
 def encrypt(
@@ -223,8 +243,14 @@ def encrypt(
             logger.log(5,'%s not matching any encrypted_regex',path)
         elif not in_place and path.endswith(suffix):
             logger.log(5,'Skipping path %s because endswith encrypt suffix',path)
-        elif not force and needs_encryption_adv(path,encrypted_path,cmd):
+        elif not force and not needs_encryption_adv(path,encrypted_path,cmd,in_place=in_place):
             logger.info(' %s already latest version encrypted with sops',encrypted_path)
+            if in_place:
+                if dry_run:
+                    print(f'would checkout: {path}')
+                else:
+                    print(f'checkout: {path}')
+                    subprocess.run(['git','checkout',path])
         else:
             try:
                 if not in_place:
@@ -287,7 +313,7 @@ def run_docker_build(
     docker_cmd = [f'docker build -f {file}']
     _cmd = ['sops','exec-env', sops_file_path,]
     pattern = re.compile('.*?--mount=type=secret,id=([^ ]+)')
-    comment_pattern = re.compile('^\s*#')
+    comment_pattern = re.compile(r'^\s*#')
     secrets = set()
     with open(file,'r') as f:
         for line in f:
