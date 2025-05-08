@@ -175,12 +175,14 @@ def write_gitignore(other_lines,ours):
             gitignore_file.write(line)
         gitignore_file.write('\n#< managed by sops-wrapper')
 
-def needs_encryption_adv(path,encrypted_path,cmd,in_place=False):
+def needs_encryption_adv(path,encrypted_path,cmd,in_place=False,dry_run=False):
     logger.debug('Checking advanced: %s - %s',path,encrypted_path)
     if in_place:
         try:
             with tempfile.NamedTemporaryFile(mode='w+b') as oldencrypted:
                 subprocess.run(['git','show',f'HEAD:{encrypted_path}'],check=True,stdout=oldencrypted,stderr=subprocess.PIPE)
+                oldencrypted.seek(0)
+                old_encrypted_data = oldencrypted.read()
                 oldencrypted.seek(0)
                 with tempfile.TemporaryFile(mode='w+b') as outfile:
                     subprocess.run(cmd+['--decrypt',oldencrypted.name],check=True,stdout=outfile,stderr=subprocess.PIPE,cwd='/tmp')
@@ -188,7 +190,7 @@ def needs_encryption_adv(path,encrypted_path,cmd,in_place=False):
                     unenc = outfile.read()
         except:
             logger.log(5,'Failed decrypting: %s',encrypted_path)
-            return False
+            return True
     else:
         with tempfile.TemporaryFile(mode='w+b') as outfile:
             try:
@@ -197,7 +199,7 @@ def needs_encryption_adv(path,encrypted_path,cmd,in_place=False):
                 unenc = outfile.read()
             except:
                 logger.log(5,'Failed decrypting: %s',encrypted_path)
-                return False
+                return True
     hasher = hashlib.sha256()
     hasher.update(unenc)
     digest = hasher.hexdigest()
@@ -206,6 +208,12 @@ def needs_encryption_adv(path,encrypted_path,cmd,in_place=False):
         hasher.update(_file.read())
     digest2 = hasher.hexdigest()
     logger.log(5,'Hashes for %s: %s - %s matching: %s',encrypted_path,digest,digest2,digest==digest2)
+    if digest2 == digest and in_place:
+        if dry_run:
+            print(f'Would checkout {path}')
+        else:
+            with open(path,'wb') as _file:
+                _file.write(old_encrypted_data)
     return digest != digest2
 
 def encrypt(
@@ -243,14 +251,8 @@ def encrypt(
             logger.log(5,'%s not matching any encrypted_regex',path)
         elif not in_place and path.endswith(suffix):
             logger.log(5,'Skipping path %s because endswith encrypt suffix',path)
-        elif not force and not needs_encryption_adv(path,encrypted_path,cmd,in_place=in_place):
+        elif not force and not needs_encryption_adv(path,encrypted_path,cmd,in_place=in_place,dry_run=dry_run):
             logger.info(' %s already latest version encrypted with sops',encrypted_path)
-            if in_place:
-                if dry_run:
-                    print(f'would checkout: {path}')
-                else:
-                    print(f'checkout: {path}')
-                    subprocess.run(['git','checkout',path])
         else:
             try:
                 if not in_place:
